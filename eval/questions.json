@@ -1,0 +1,29 @@
+[
+  {
+    "id": "q1",
+    "question": "大模型长上下文技术如何扩展？",
+    "expect_keywords": ["RoPE", "上下文", "评测"],
+    "note": "与内置离线语料对齐，mock 模式下关键字覆盖率应有意义"
+  },
+  {
+    "id": "q2",
+    "question": "2026 年国产大模型的竞争格局如何？",
+    "expect_keywords": [],
+    "note": "真实模式评测题；mock 模式下覆盖率无意义（见 README 说明）"
+  },
+  {
+    "id": "q3",
+    "question": "RAG 系统中混合检索相比纯向量检索的优势是什么？",
+    "expect_keywords": ["BM25", "向量", "关键词"]
+  },
+  {
+    "id": "q4",
+    "question": "AI Agent 的记忆管理有哪些主流方案？",
+    "expect_keywords": []
+  },
+  {
+    "id": "q5",
+    "question": "MCP 协议解决了什么问题？",
+    "expect_keywords": ["工具", "协议"]
+  }
+]
