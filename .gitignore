@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# 运行产物与本地缓存
+runs/
+.cache/
+
+# 环境变量（不要提交密钥）
+.env
+
+# 编辑器
+.idea/
+.vscode/

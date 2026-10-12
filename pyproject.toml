@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepscout"
+version = "0.1.0"
+description = "DeepScout —— 中文优先的深度调研 Agent：子问题规划 → 多源检索取证 → 证据库混合检索 → 带引用核验的结构化报告"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "yangyumengovo" }]
+keywords = ["ai-agent", "deep-research", "langgraph", "rag", "llm", "tool-calling"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "langgraph>=0.4",
+    "openai>=1.40",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "jieba>=0.42",
+    "trafilatura>=1.12",
+    "ddgs>=9.0",
+    "beautifulsoup4>=4.12",
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+embed = ["fastembed>=0.4"]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+deepscout = "deepscout.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+deepscout = ["sample_data/*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
