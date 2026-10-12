@@ -122,23 +122,23 @@ class EvidenceIndex:
     def search(self, query: str, k: int = 6) -> list[tuple[EvidenceChunk, float]]:
         if not self.chunks or self._bm25 is None:
             return []
-        import numpy as np
-
-        bm = np.array(self._bm25.get_scores(_tokenize(query)), dtype=float)
-        bm_max = bm.max()
-        bm = bm / bm_max if bm_max > 0 else bm
+        # BM25 路径用纯 Python：证据库是单次调研的小语料（几十块），
+        # 不值得为此引入 numpy 依赖；向量分支启用时 fastembed 自带 numpy。
+        bm = self._bm25.get_scores(_tokenize(query))
+        bm_max = max(bm) if bm else 0.0
+        scores = [s / bm_max if bm_max > 0 else s for s in bm]
 
         if self._vecs is not None and self.embedder is not None:
+            import numpy as np
+
             qv = np.array(self.embedder.embed([query])[0])
             cos = self._vecs @ qv / (
                 np.linalg.norm(self._vecs, axis=1) * np.linalg.norm(qv) + 1e-9
             )
-            score = 0.5 * bm + 0.5 * cos
-        else:
-            score = bm
+            scores = (0.5 * np.array(scores) + 0.5 * cos).tolist()
 
-        order = np.argsort(-score)[:k]
-        return [(self.chunks[i], float(score[i])) for i in order if score[i] > 0]
+        order = sorted(range(len(scores)), key=lambda i: -scores[i])[:k]
+        return [(self.chunks[i], float(scores[i])) for i in order if scores[i] > 0]
 
 
 def get_embedder(settings: Settings):
