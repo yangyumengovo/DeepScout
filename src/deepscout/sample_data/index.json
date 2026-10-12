@@ -1,0 +1,30 @@
+[
+  {
+    "file": "rope",
+    "title": "RoPE 与位置编码外推",
+    "url": "demo://llm-context/rope",
+    "snippet": "旋转位置编码 RoPE 如何支持大模型把上下文窗口扩展到训练长度之外……",
+    "keywords": ["长上下文", "上下文", "RoPE", "位置编码", "外推", "扩展", "大模型"]
+  },
+  {
+    "file": "attn",
+    "title": "长序列的稀疏注意力方法",
+    "url": "demo://llm-context/attn",
+    "snippet": "稀疏注意力、FlashAttention 与线性注意力如何降低长序列的计算与显存开销……",
+    "keywords": ["注意力", "稀疏", "FlashAttention", "长序列", "开销", "显存"]
+  },
+  {
+    "file": "eval",
+    "title": "长上下文评测基准",
+    "url": "demo://llm-context/eval",
+    "snippet": "LongBench、RULER 与大海捞针等基准如何衡量模型的真实长文本能力……",
+    "keywords": ["评测", "基准", "LongBench", "RULER", "长文本", "大海捞针", "检索"]
+  },
+  {
+    "file": "kv",
+    "title": "KV Cache 压缩与显存优化",
+    "url": "demo://llm-context/kv",
+    "snippet": "KV Cache 量化、淘汰与共享等显存优化手段……",
+    "keywords": ["KV", "KV Cache", "显存", "量化", "压缩", "推理成本"]
+  }
+]
