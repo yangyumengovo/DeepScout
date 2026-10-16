@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     chunk_overlap: int = 80
     report_language: str = "中文"
 
+    # 消融开关（eval/run_eval.py --ablate 使用，量化各模块增量）
+    disable_planner: bool = False  # True: 跳过规划节点，直接用原问题作为唯一子查询
+    disable_verify: bool = False  # True: 跳过引用核验节点
+
     # LLM 响应磁盘缓存（开发期省钱：相同请求直接命中缓存）
     llm_cache: bool = True
 

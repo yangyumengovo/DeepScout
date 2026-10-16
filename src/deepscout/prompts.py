@@ -8,7 +8,15 @@ Prompt 的任何修改都应递增版本号并同步记录到 eval/ 的调优记
 
 from __future__ import annotations
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v1.2"
+
+# v1.1 变更（源自首次真实评估的三个发现）：
+# 1. 检索员：传入已抓取链接，引导来源多样性（此前 7 条引用中 6 条来自同一篇博客）；
+# 2. 撰写者：禁止重复章节标题（模型会先输出一遍标题再写正文）；
+# 3. 核验员：理由限定中文且不超过 40 字（此前输出长段英文理由）。
+# v1.2 变更（源自边界题评估：虚构论文/产品题目未拒答，核验通过率跌至 14%）：
+# 4. 检索员 + 撰写者：证据必须「明确提到题目中的具体对象」，仅同主题的泛泛页面不算支撑；
+#    找不到对象时如实声明，禁止用相邻主题内容推测该对象的方法或结论。
 
 # ---- 角色标记（FakeLLM 剧本匹配依赖，勿随意改动）----
 MARKER_PLAN = "研究规划师"
@@ -32,7 +40,9 @@ def plan_messages(question: str, n: int, language: str = "中文") -> list[dict]
     ]
 
 
-def search_agent_messages(question: str, subquery: str, results_text: str) -> list[dict]:
+def search_agent_messages(
+    question: str, subquery: str, results_text: str, avoid_urls: list[str] | None = None
+) -> list[dict]:
     system = (
         f"你是{MARKER_SEARCH}，负责为一个研究子问题收集证据。你可以调用工具：\n"
         "- fetch_page(url)：抓取网页正文，判断是否值得引用；\n"
@@ -40,11 +50,18 @@ def search_agent_messages(question: str, subquery: str, results_text: str) -> li
         "工作方式：先从下方搜索结果中挑选最相关的 1-3 条调用 fetch_page 阅读；"
         "若都不相关，可换关键词调用 web_search。信息足够后，输出调研笔记：3-6 条要点，"
         "每条要点末尾以 [SRC: 页面URL] 标注来源；只陈述页面中真实出现的信息，不要编造。"
+        "\n注意：优先选择不同站点的来源，避免所有要点都出自同一页面。"
+        "\n关键原则：只有页面明确提到子问题要求的具体对象（产品名/论文名/公司名等）时才算相关证据，"
+        "仅同主题的泛泛页面不算；若所有结果都不包含该对象，在笔记中明确写「未找到与该对象直接相关的资料」。"
     )
     user = (
-        f"总研究问题：{question}\n当前子问题：{subquery}\n\n搜索结果：\n{results_text}\n\n"
-        "请开始（先决定要抓取哪些链接）。"
+        f"总研究问题：{question}\n当前子问题：{subquery}\n\n搜索结果：\n{results_text}\n"
     )
+    if avoid_urls:
+        user += "\n以下链接在处理其他子问题时已抓取过，除非高度相关否则优先选择其他来源：\n" + "\n".join(
+            f"- {u}" for u in avoid_urls
+        )
+    user += "\n请开始（先决定要抓取哪些链接）。"
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -71,7 +88,10 @@ def section_messages(
         f"你是{MARKER_WRITE}。撰写报告的一个章节，要求：\n"
         f"1. 150-300 字，用{language}，信息密度高，不写空话；\n"
         "2. 每一条具体事实/数据后必须紧跟证据编号引用，如 [E3]；只引用下方给出的编号，禁止编造；\n"
-        "3. 若下方证据不足以支撑本章节，直接说明「现有资料不足以回答该方面」，不要猜测。"
+        "3. 若下方证据不足以支撑本章节，直接说明「现有资料不足以回答该方面」，不要猜测；\n"
+        "4. 直接输出章节正文，不要重复章节标题或编号；\n"
+        "5. 证据必须明确提到题目中的具体对象（产品/论文/公司名等）才算支撑；"
+        "仅同主题的泛泛页面不算。找不到该对象时，如实说明未找到，禁止用同主题内容推测该对象的方法或结论。"
     )
     user = (
         f"总研究问题：{question}\n本章节标题：{section_title}\n\n可用证据：\n{evidence_text}\n\n"
@@ -87,7 +107,7 @@ def verify_messages(pairs_text: str) -> list[dict]:
     system = (
         f"你是{MARKER_VERIFY}。给你若干「论断 - 证据」对，逐条判断证据是否能支撑论断：\n"
         '- supported：证据明确支撑；partial：部分支撑或不够具体；unsupported：证据不支撑或无关。\n'
-        f"严格依据证据原文判断，宁可判 partial 也不要放水。{_JSON_ONLY} "
+        f"严格依据证据原文判断，宁可判 partial 也不要放水。reason 用中文、不超过 40 字。{_JSON_ONLY} "
         '格式：{"results": [{"evidence_id": "E3", "verdict": "supported", "reason": "..."}, ...]}'
     )
     return [

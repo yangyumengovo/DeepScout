@@ -1,17 +1,20 @@
 """评测脚本。
 
 用法：
-    python eval/run_eval.py --mock          # 离线冒烟：验证流水线与指标产出（不代表真实质量）
-    python eval/run_eval.py --limit 2       # 真实评测：跑前 2 题（需要配置 .env）
-    python eval/run_eval.py                 # 真实评测：全量
+    python eval/run_eval.py --mock                    # 离线冒烟：验证流水线（不代表质量）
+    python eval/run_eval.py --limit 5                 # 真实评测前 5 题（需 .env 配置）
+    python eval/run_eval.py --type boundary           # 只跑拒答边界题
+    python eval/run_eval.py --ablate --limit 3        # 消融：full/no-plan/no-verify/naive 四配置对比
+    python eval/run_eval.py --no-verify --limit 3     # 单独跑某个消融配置
 
-指标（v0.1）：
-- keyword_coverage：题目预期关键词在报告中命中的比例（人工设定的粗粒度质量代理指标）
-- supported_rate  ：引用核验通过率（verify 节点输出）
-- n_sources / tokens / llm_calls / wall_s：工程指标
+指标：
+- keyword_coverage：题目预期关键词在报告中命中的比例（质量代理指标）
+- refusal_hit     ：边界题（虚构对象/未来信息）是否如实声明信息不足（防幻觉指标）
+- supported_rate  ：引用核验通过率（verify 节点产出）
+- unique_sources  ：引用来源的去重站点数（来源多样性，v1.1 新增）
+- tokens / llm_calls / wall_s：工程指标（质量 vs 成本的权衡）
 
-注意：--mock 模式下所有题目都会产出同一份「长上下文」演示报告，只有 q1 的
-keyword_coverage 有意义。mock 用于回归测试，真实质量评估请配置 API key 后运行。
+注意：--mock 模式下所有题目产出同一份演示报告，指标仅用于回归检查，不代表真实质量。
 """
 
 from __future__ import annotations
@@ -29,6 +32,20 @@ from deepscout.settings import Settings  # noqa: E402
 
 QUESTIONS = json.loads((Path(__file__).parent / "questions.json").read_text("utf-8"))
 
+REFUSAL_MARKERS = [
+    "无法确认", "无法确定", "未能找到", "没有找到", "未找到", "信息不足",
+    "资料不足", "无法核实", "不掌握", "查不到", "无法获得", "未能获取",
+    "不存在", "无法回答", "难以确认", "缺乏足够", "未能直接找到",
+]
+
+# 消融配置：naive = 最笨基线（无规划、无核验、单子查询）
+CONFIGS: dict[str, dict] = {
+    "full": {},
+    "no-plan": {"disable_planner": True},
+    "no-verify": {"disable_verify": True},
+    "naive": {"disable_planner": True, "disable_verify": True, "max_subqueries": 1},
+}
+
 
 def keyword_coverage(report_md: str, keywords: list[str]) -> float | None:
     if not keywords:
@@ -37,57 +54,127 @@ def keyword_coverage(report_md: str, keywords: list[str]) -> float | None:
     return round(hit / len(keywords), 3)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mock", action="store_true", help="离线冒烟模式")
-    parser.add_argument("--limit", type=int, default=None, help="只跑前 N 题")
-    args = parser.parse_args()
+def refusal_hit(report_md: str) -> bool:
+    return any(m in report_md for m in REFUSAL_MARKERS)
 
-    settings = Settings(runs_dir=Path("runs/eval"))
+
+def run_config(name: str, flags: dict, questions: list[dict], mock: bool) -> list[dict]:
+    settings = Settings(runs_dir=Path("runs/eval"), **flags)
     rows = []
-    for q in QUESTIONS[: args.limit or len(QUESTIONS)]:
+    for q in questions:
         t0 = time.perf_counter()
-        result = run_research(q["question"], settings=settings, mock=args.mock)
+        print(f"[{name}] {q['id']} {q['question'][:24]} ...", flush=True)
+        result = run_research(q["question"], settings=settings, mock=mock)
         stats = result.get("stats", {})
         verif = result.get("verification", {})
-        rows.append(
-            {
-                "id": q["id"],
-                "question": q["question"],
-                "status": result.get("status"),
-                "keyword_coverage": keyword_coverage(
-                    result.get("report_md", ""), q.get("expect_keywords", [])
-                ),
-                "supported_rate": verif.get("supported_rate"),
-                "n_sources": len(result.get("sources", [])),
-                "llm_calls": stats.get("llm_calls"),
-                "tokens": stats.get("tokens"),
-                "est_cost_usd": stats.get("est_cost_usd"),
-                "wall_s": round(time.perf_counter() - t0, 1),
-                "run_dir": result.get("run_dir", ""),
-            }
+        report = result.get("report_md", "")
+        row = {
+            "config": name,
+            "id": q["id"],
+            "type": q.get("type", "-"),
+            "status": result.get("status"),
+            "keyword_coverage": keyword_coverage(report, q.get("expect_keywords", [])),
+            "refusal_hit": refusal_hit(report) if q.get("expect_refusal") else None,
+            "supported_rate": verif.get("supported_rate"),
+            "n_sources": len(result.get("sources", [])),
+            "unique_sources": len({s.get("url") for s in result.get("sources", [])}),
+            "llm_calls": stats.get("llm_calls"),
+            "tokens": stats.get("tokens"),
+            "wall_s": round(time.perf_counter() - t0, 1),
+            "run_dir": result.get("run_dir", ""),
+        }
+        rows.append(row)
+        print(
+            f"[{name}] {q['id']} -> {row['status']}  cov={row['keyword_coverage']}  "
+            f"verify={row['supported_rate']}  uniq_src={row['unique_sources']}  {row['wall_s']}s",
+            flush=True,
         )
-        print(f"[{q['id']}] {result.get('status')} sources={rows[-1]['n_sources']}")
+    return rows
 
-    out = Path("eval") / f"report_{time.strftime('%Y%m%d-%H%M%S')}.md"
+
+def mean(vals: list) -> float | None:
+    vals = [v for v in vals if v is not None]
+    return round(sum(vals) / len(vals), 3) if vals else None
+
+
+def fmt(v) -> str:
+    return "-" if v is None else str(v)
+
+
+def render_report(rows: list[dict], configs_ran: list[str], mock: bool) -> str:
     lines = [
         "# DeepScout 评测报告",
-        f"- 模式：{'mock（离线冒烟，不代表真实质量）' if args.mock else '真实'}",
+        f"- 模式：{'mock（离线冒烟，不代表真实质量）' if mock else '真实'}",
         f"- 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
         "",
-        "| 题目 | 状态 | 关键词覆盖 | 引用核验通过率 | 来源数 | LLM调用 | token | 成本$ | 用时s |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "## 明细",
+        "| 配置 | 题目 | 类型 | 状态 | 关键词覆盖 | 拒答命中 | 核验通过率 | 唯一来源数 | LLM调用 | token | 用时s |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         lines.append(
-            f"| {r['id']} {r['question'][:20]} | {r['status']} | "
-            f"{r['keyword_coverage'] if r['keyword_coverage'] is not None else '-'} | "
-            f"{r['supported_rate'] if r['supported_rate'] is not None else '-'} | "
-            f"{r['n_sources']} | {r['llm_calls']} | {r['tokens']} | {r['est_cost_usd']} | {r['wall_s']} |"
+            f"| {r['config']} | {r['id']} | {r['type']} | {r['status']} | {fmt(r['keyword_coverage'])} | "
+            f"{fmt(r['refusal_hit'])} | {fmt(r['supported_rate'])} | {r['unique_sources']} | "
+            f"{r['llm_calls']} | {r['tokens']} | {r['wall_s']} |"
         )
-    out.write_text("\n".join(lines), "utf-8")
-    print("\n".join(lines))
-    print(f"\n已写入 {out}")
+
+    lines += [
+        "",
+        "## 按配置汇总（均值）",
+        "| 配置 | 关键词覆盖 | 拒答命中率 | 核验通过率 | 唯一来源数 | token | 用时s |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for cfg in configs_ran:
+        sub = [r for r in rows if r["config"] == cfg]
+        lines.append(
+            f"| {cfg} | {fmt(mean([r['keyword_coverage'] for r in sub]))} | "
+            f"{fmt(mean([r['refusal_hit'] for r in sub if r['refusal_hit'] is not None]))} | "
+            f"{fmt(mean([r['supported_rate'] for r in sub]))} | "
+            f"{fmt(mean([r['unique_sources'] for r in sub]))} | "
+            f"{fmt(mean([r['tokens'] for r in sub]))} | "
+            f"{fmt(mean([r['wall_s'] for r in sub]))} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mock", action="store_true", help="离线冒烟模式")
+    parser.add_argument("--limit", type=int, default=None, help="只跑前 N 题（按筛选后计）")
+    parser.add_argument("--type", dest="qtype", choices=["factual", "synthesis", "boundary"], default=None)
+    parser.add_argument("--ablate", action="store_true", help="跑 full/no-plan/no-verify/naive 四配置")
+    parser.add_argument("--no-plan", action="store_true", help="单独跑 no-plan 配置")
+    parser.add_argument("--no-verify", action="store_true", help="单独跑 no-verify 配置")
+    parser.add_argument("--naive", action="store_true", help="单独跑 naive 基线")
+    args = parser.parse_args()
+
+    questions = QUESTIONS
+    if args.qtype:
+        questions = [q for q in questions if q.get("type") == args.qtype]
+    if args.limit:
+        questions = questions[: args.limit]
+    print(f"共 {len(questions)} 题")
+
+    if args.ablate:
+        configs_ran = ["full", "no-plan", "no-verify", "naive"]
+    elif args.no_plan:
+        configs_ran = ["no-plan"]
+    elif args.no_verify:
+        configs_ran = ["no-verify"]
+    elif args.naive:
+        configs_ran = ["naive"]
+    else:
+        configs_ran = ["full"]
+
+    rows: list[dict] = []
+    for cfg in configs_ran:
+        rows.extend(run_config(cfg, CONFIGS[cfg], questions, args.mock))
+
+    report = render_report(rows, configs_ran, args.mock)
+    out = Path("eval") / f"report_{time.strftime('%Y%m%d-%H%M%S')}.md"
+    out.write_text(report, "utf-8")
+    print("\n" + report)
+    print(f"已写入 {out}")
 
 
 if __name__ == "__main__":

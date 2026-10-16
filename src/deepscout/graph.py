@@ -76,6 +76,9 @@ def build_research_graph(ctx: RunContext):
     # ---------- 1. 规划：研究问题 -> 子查询 ----------
     def plan_node(state: ResearchState) -> dict:
         t0 = time.perf_counter()
+        if s.disable_planner:  # 消融：跳过规划，用原问题作为唯一子查询
+            ctx.trace.node("plan", time.perf_counter() - t0)
+            return {"subqueries": [state["question"]]}
         msgs = prompts.plan_messages(state["question"], s.max_subqueries, s.report_language)
         resp = call_llm("plan", msgs, temperature=0.2, expect_json=True)
         data = extract_json(resp.content) or {}
@@ -103,7 +106,10 @@ def build_research_graph(ctx: RunContext):
                 results = []
 
             msgs = prompts.search_agent_messages(
-                state["question"], sq, prompts.format_search_results(results)
+                state["question"],
+                sq,
+                prompts.format_search_results(results),
+                avoid_urls=sorted(seen_urls),
             )
             fetched_this_query = 0
             last_content = ""
@@ -209,6 +215,9 @@ def build_research_graph(ctx: RunContext):
     # ---------- 6. 引用核验（差异化能力：报告里的引用逐条对回证据原文） ----------
     def verify_node(state: ResearchState) -> dict:
         t0 = time.perf_counter()
+        if s.disable_verify:  # 消融：跳过核验（用于量化核验模块本身的成本与价值）
+            ctx.trace.node("verify", time.perf_counter() - t0)
+            return {"verification": {"results": [], "supported_rate": None, "skipped": True}}
         chunk_map = {c.eid: c for c in (ctx.index.chunks if ctx.index else [])}
         pairs = []
         seen: set[str] = set()

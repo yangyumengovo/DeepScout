@@ -48,3 +48,14 @@ def test_verification_rates_present(mock_settings):
     verif = result.get("verification", {})
     assert verif.get("supported_rate") is not None
     assert 0.0 <= verif["supported_rate"] <= 1.0
+
+
+def test_naive_ablation_skips_plan_and_verify(mock_settings):
+    """消融开关：naive 模式跳过规划与核验，LLM 调用数显著减少。"""
+    naive = mock_settings.model_copy(update={"disable_planner": True, "disable_verify": True})
+    result = run_research(QUESTION, settings=naive, mock=True)
+    assert result["status"] == "done", result.get("error")
+    assert result["subqueries"] == [QUESTION]  # 未规划：原问题即唯一子查询
+    assert result["verification"].get("supported_rate") is None  # 未核验
+    assert result["stats"]["llm_calls"] <= 7  # full 模式为 10
+    assert "[1]" in result["report_md"]
