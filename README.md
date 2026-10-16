@@ -140,18 +140,6 @@ src/deepscout/
 tests/              # 25 个测试，全部离线可跑（mock LLM + mock 搜索）
 ```
 
-## 能力对齐（Agent 开发岗位要求 → 项目落点）
-
-| 岗位要求 | 本项目对应实现 |
-|---|---|
-| LangChain/LangGraph 智能体编排 | `graph.py`：StateGraph 七节点流水线，状态显式管理 |
-| 工具调用 | `tools.py` + `graph.py` retrieve 节点：Schema 自动生成、参数校验、失败重试上限 |
-| Prompt 调优 | `prompts.py` 版本化管理，JSON 解析失败自动重试 |
-| RAG 知识库搭建与调试 | `evidence.py`：分块策略 + BM25/向量混合检索 |
-| 功能验证与单元测试 | 24 个离线测试（FakeLLM 确定性回放），CI 双 Python 版本全绿 |
-| 问题复现与归因 | `trace.jsonl` 全量追踪 + 评测脚本指标 |
-| 技术文档与调研笔记 | 本 README、[docs/design.md](docs/design.md)（含踩坑记录） |
-
 ## 设计决策与踩坑记录
 
 见 [docs/design.md](docs/design.md)。包括：为什么用 LangGraph 而不是裸循环、为什么自实现 BM25（rank_bm25 的 IDF 在小语料上会精确归零——实测踩到的坑）、为什么引用核验是独立节点、为什么 mock 模式是一等公民。
@@ -170,7 +158,7 @@ tests/              # 25 个测试，全部离线可跑（mock LLM + mock 搜索
 - [ ] 扫描版 PDF / 图片资料用 Qwen-VL 解析入库（多模态证据源）
 - [ ] 简易 Web UI（对话式输入 + 报告渲染）
 
-## 局限（诚实声明）
+## 局限
 
 - 检索依赖通用搜索源，专业数据库（知网等）未接入；搜索质量直接决定报告质量上限；
 - 引用核验本身由 LLM 完成，存在核验者自身出错的可能，通过率是参考而非保证；
