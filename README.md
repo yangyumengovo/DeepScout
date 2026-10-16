@@ -82,13 +82,36 @@ curl -N localhost:8000/api/research/<run_id>/stream    # 实时节点进度 + �
 ## 评测
 
 ```bash
-python eval/run_eval.py --mock        # 离线冒烟（CI 同款，验证流水线而非质量）
-python eval/run_eval.py --limit 2     # 真实评测前 2 题（需配置 .env）
+python eval/run_eval.py --mock               # 离线冒烟（CI 同款，验证流水线而非质量）
+python eval/run_eval.py --type boundary      # 拒答边界题（防幻觉）
+python eval/run_eval.py --ablate --limit 3   # 消融：full/no-plan/no-verify/naive 四配置对比
 ```
 
-v0.1 指标：**关键词覆盖率**（题目预期要点命中比例）、**引用核验通过率**（verify 节点）、来源数 / token / 成本 / 延迟（工程指标）。评测题见 [eval/questions.json](eval/questions.json)，历史报告存于 `eval/report_*.md`。
+指标：**关键词覆盖率**（预期要点命中）、**拒答命中率**（边界题如实声明信息不足）、**引用核验通过率**（verify 节点）、**唯一来源数**（多样性）、token / 延迟（工程指标）。评测集 30 题，分事实 / 综合 / 拒答边界三层（[eval/questions.json](eval/questions.json)），历史报告存于 `eval/report_*.md`。
 
-> 诚实说明：`--mock` 模式下所有题目产出同一份演示报告，仅 q1 的覆盖率有意义；mock 用于回归，不代表真实质量。
+### 真实结果（GLM-4-Flash，2026-10-16）
+
+**边界题迭代**（2 道虚构对象题，prompt v1 → v1.2）：
+
+| 指标 | v1 | v1.2 |
+|---|---|---|
+| 拒答命中率 | 0% | **100%** |
+| 虚构论文题核验通过率 | 14% | **56%** |
+
+**消融实验**（3 道事实题 × 4 配置，均值）：
+
+| 配置 | 关键词覆盖 | 核验通过率 | 唯一来源数 | token | 用时s |
+|---|---|---|---|---|---|
+| full | 0.778 | 0.767 | 2.33 | 31624 | 140.0 |
+| no-plan | **0.889** | **1.0** | 1.67 | 23289 | 105.3 |
+| no-verify | 0.778 | - | **3.0** | 37112 | 156.0 |
+| naive | **0.889** | - | 2.0 | **21962** | 62.8* |
+
+\* naive-q01 的 5.7s 为磁盘缓存命中（与 no-plan 消息序列相同），q02/q03 的 90s 左右为真实耗时。
+
+**诚实解读**：在简单事实题上，规划模块是负收益——原问题本身就是好查询，拆成三个子查询反而稀释了关键词命中；核验通过率更高则因为引用更少更集中。**这不代表模块无用，代表这批题太简单**：规划的价值预期在宽泛综合题（q13+），需在 synthesis 子集上复测后下结论。消融的意义就是防止「感觉有用」——目前的数据说明 full 配置的性价比假设尚未被证明。
+
+> `--mock` 模式下所有题目产出同一份演示报告，仅用于回归检查，不代表真实质量。
 
 ## 项目结构
 
@@ -98,13 +121,13 @@ src/deepscout/
 ├── tools.py        # 工具层：pydantic 声明参数 -> 自动生成 JSON Schema -> 校验执行
 ├── search.py       # 搜索供应商抽象：ddgs / tavily / mock
 ├── evidence.py     # 证据库：分块 + BM25（自实现，见 docs/design.md）+ 可选向量
-├── graph.py        # LangGraph 编排：七节点流水线 + Function Calling 循环
-├── prompts.py      # 版本化 Prompt（版本号 + 调优记录随 eval 沉淀）
+├── graph.py        # LangGraph 编排：七节点流水线 + Function Calling 循环 + 消融开关
+├── prompts.py      # 版本化 Prompt（v1.2，每轮变更理由见文件头注释）
 ├── trace.py        # 运行追踪：LLM/工具/节点全量记入 trace.jsonl
 ├── runner.py       # 运行器：依赖组装、产物落盘
 ├── cli.py          # CLI：research / serve
 └── api/app.py      # FastAPI：提交任务 + SSE 进度 + 报告查询
-tests/              # 24 个测试，全部离线可跑（mock LLM + mock 搜索）
+tests/              # 25 个测试，全部离线可跑（mock LLM + mock 搜索）
 ```
 
 ## 能力对齐（Agent 开发岗位要求 → 项目落点）
@@ -127,7 +150,8 @@ tests/              # 24 个测试，全部离线可跑（mock LLM + mock 搜索
 
 - [x] 离线 mock 模式与全绿 CI
 - [x] 引用核验节点（supported / partial / unsupported）
-- [ ] 真实模式评测报告（各指标随版本沉淀）
+- [x] 真实模式评测与消融实验（GLM-4-Flash，见「评测」节与 eval/report_*.md）
+- [ ] 消融在 synthesis 综合题子集上复测（验证规划模块在复杂任务下的价值假设）
 - [ ] LangGraph Send API 并行检索多个子问题
 - [ ] Dify 同场景对照实现（DSL 导出 + 对比笔记）
 - [ ] 扫描版 PDF / 图片资料用 Qwen-VL 解析入库（多模态证据源）
