@@ -21,7 +21,13 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from . import prompts
-from .evidence import EvidenceIndex, build_evidence, filter_by_anchors, get_embedder, question_anchors
+from .evidence import (
+    EvidenceIndex,
+    build_evidence,
+    filter_by_anchors,
+    get_embedder,
+    question_anchors,
+)
 from .json_utils import extract_json
 from .llm import LLMClient
 from .settings import Settings
@@ -53,6 +59,7 @@ class RunContext:
     toolbox: ToolBox
     trace: RunTrace
     index: EvidenceIndex | None = field(default=None)
+    reranker: object = None  # 可选 cross-encoder 重排器（None 则跳过重排）
 
 
 def build_research_graph(ctx: RunContext):
@@ -203,9 +210,14 @@ def build_research_graph(ctx: RunContext):
         anchors = question_anchors(state["question"]) if s.strict_object_grounding else []
         sections_out = []
         for title in state["outline"]["sections"]:
-            hits = ctx.index.search(f"{state['question']} {title}", k=8) if ctx.index else []
-            eligible = filter_by_anchors([c for c, _ in hits], anchors)
-            ev_text = prompts.format_evidence(eligible)
+            query = f"{state['question']} {title}"
+            # 开启重排时扩大召回池到 10，重排后取 top-6；
+            # 未开启重排时保持 k=8、不截断——与 v1.3 行为逐字节一致（消融可比性）
+            hits = ctx.index.search(query, k=10 if ctx.reranker else 8) if ctx.index else []
+            chunks = filter_by_anchors([c for c, _ in hits], anchors)
+            if ctx.reranker is not None and len(chunks) > 1:
+                chunks = ctx.reranker.rerank_top(query, chunks, top_k=6)
+            ev_text = prompts.format_evidence(chunks)
             resp = call_llm(
                 f"write:{title[:20]}",
                 prompts.section_messages(state["question"], title, ev_text, s.report_language),

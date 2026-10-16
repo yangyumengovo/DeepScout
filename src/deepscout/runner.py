@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from .evidence import get_reranker
 from .graph import RunContext, build_research_graph
 from .llm import make_llm
 from .search import make_search
@@ -41,6 +42,7 @@ def run_research(
             llm=make_llm(settings, mock),
             toolbox=ToolBox(make_search(settings, mock)),
             trace=trace,
+            reranker=get_reranker(settings) if not mock else None,
         )
         graph = build_research_graph(ctx)
         for update in graph.stream({"question": question}, config={"recursion_limit": 100}):

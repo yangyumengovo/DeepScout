@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # 向量检索：none（仅 BM25）| fastembed（bge-small-zh-v1.5，本地免费）
     embed_provider: str = "none"
 
+    # 重排（RAG 三层的第二层）：none | fastembed（cross-encoder，默认 bge-reranker-v2-m3）
+    rerank_provider: str = "none"
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+
     # 行为参数
     max_subqueries: int = 3
     max_fetch_per_query: int = 3

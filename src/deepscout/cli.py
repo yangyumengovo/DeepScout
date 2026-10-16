@@ -27,6 +27,10 @@ def main(argv=None) -> None:
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8000)
 
+    p_ui = sub.add_parser("ui", help="启动 Web UI（Gradio，需安装 .[ui] 可选依赖）")
+    p_ui.add_argument("--host", default="127.0.0.1")
+    p_ui.add_argument("--port", type=int, default=7860)
+
     args = parser.parse_args(argv)
 
     if args.cmd == "research":
@@ -62,6 +66,14 @@ def main(argv=None) -> None:
         import uvicorn
 
         uvicorn.run("deepscout.api.app:app", host=args.host, port=args.port)
+
+    elif args.cmd == "ui":
+        try:
+            from .webui import main as ui_main
+        except ImportError as e:
+            print(f"缺少 Gradio 依赖：{e}\n请运行 pip install '.[ui]' 后重试")
+            sys.exit(1)
+        ui_main(host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

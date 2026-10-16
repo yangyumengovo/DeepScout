@@ -66,6 +66,13 @@ curl -N localhost:8000/api/research/<run_id>/stream    # 实时节点进度 + �
 
 接口文档（Swagger UI）：`http://localhost:8000/docs`
 
+### Web UI
+
+```bash
+pip install -e ".[ui]"
+deepscout ui            # 打开 http://127.0.0.1:7860
+```
+
 ## 配置
 
 | 环境变量 | 默认值 | 说明 |
@@ -75,6 +82,7 @@ curl -N localhost:8000/api/research/<run_id>/stream    # 实时节点进度 + �
 | `DEEPSCOUT_LLM_MODEL` | `deepseek-chat` | 模型名，换供应商只改这两项 |
 | `DEEPSCOUT_SEARCH_PROVIDER` | `ddgs` | 搜索源：`ddgs`（免 key）/ `tavily` / `mock` |
 | `DEEPSCOUT_EMBED_PROVIDER` | `none` | `fastembed` 开启 bge-small-zh 向量 + BM25 混合检索 |
+| `DEEPSCOUT_RERANK_PROVIDER` | `none` | `fastembed` 开启 bge-reranker-v2-m3 重排（需 `.[rerank]` 可选依赖） |
 | `DEEPSCOUT_MAX_SUBQUERIES` | `3` | 子问题拆解数量 |
 
 完整参数见 [.env.example](.env.example)。LLM 响应默认带磁盘缓存（`.cache/`），开发期重复调试不重复计费。
@@ -119,7 +127,16 @@ v1.3 的「对象锚点硬校验」：从题目提取对象锚点（产品名/�
 
 \* 个别 naive 运行的秒数为磁盘缓存命中（与 no-plan 消息序列相同），其余为真实耗时。
 
-**结论（两次消融合起来读）**：简单事实题上规划模块是负收益（原问题本身就是好查询，拆分反而稀释关键词），宽泛综合题上规划覆盖率 +22pp、来源多样性翻倍——**任务复杂度决定配置取舍，没有全局最优**。这组数据防止了「感觉有用」的错觉，也说明评测必须分层出题。
+**消融实验三：Rerank 重排**（同 3 道事实题，与 full 仅差 rerank 一个变量）：
+
+| 配置 | 关键词覆盖 | 核验通过率 | 用时s |
+|---|---|---|---|
+| full | 0.778 | 0.767 | 140.0 |
+| full+rerank | **0.889** | **0.958** | 209.7 |
+
+重排（bge-reranker-v2-m3 cross-encoder）把「词面命中但语义跑偏」的证据块挤出前 6，核验通过率 +19pp、覆盖 +11pp；代价是 CPU 推理使单次运行时长约 +50%。至此 RAG 三层齐备：**BM25 召回 → rerank 重排 → 引用核验**，且未开启重排时代码路径与不装可选依赖时完全一致（消融可比性）。
+
+**结论（三次消融合起来读）**：简单事实题上规划模块是负收益（原问题本身就是好查询，拆分反而稀释关键词），宽泛综合题上规划覆盖率 +22pp、来源多样性翻倍——**任务复杂度决定配置取舍，没有全局最优**。这组数据防止了「感觉有用」的错觉，也说明评测必须分层出题。
 
 > `--mock` 模式下所有题目产出同一份演示报告，仅用于回归检查，不代表真实质量。
 
@@ -135,7 +152,8 @@ src/deepscout/
 ├── prompts.py      # 版本化 Prompt（v1.2，每轮变更理由见文件头注释）
 ├── trace.py        # 运行追踪：LLM/工具/节点全量记入 trace.jsonl
 ├── runner.py       # 运行器：依赖组装、产物落盘
-├── cli.py          # CLI：research / serve
+├── cli.py          # CLI：research / serve / ui
+├── webui.py        # Gradio Web UI：输入 -> 实时进度 -> 报告渲染
 └── api/app.py      # FastAPI：提交任务 + SSE 进度 + 报告查询
 tests/              # 25 个测试，全部离线可跑（mock LLM + mock 搜索）
 ```
@@ -152,7 +170,7 @@ tests/              # 25 个测试，全部离线可跑（mock LLM + mock 搜索
 - [x] 综合题消融复测（证实规划模块在复杂任务下的价值假设）
 - [x] 对象锚点硬校验 v1.3（机制级防幻觉，分层防御）
 - [ ] 锚点碰撞的进一步防御（多锚点共现 / 别名扩展）
-- [ ] Rerank 接入与检索层消融（召回 → 重排 → 引用三层）
+- [x] Rerank 接入与检索层消融（核验通过率 +19pp，召回 → 重排 → 引用三层齐备）
 - [ ] LangGraph Send API 并行检索多个子问题
 - [ ] Dify 同场景对照实现（DSL 导出 + 对比笔记）
 - [ ] 扫描版 PDF / 图片资料用 Qwen-VL 解析入库（多模态证据源）

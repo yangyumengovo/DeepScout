@@ -31,6 +31,8 @@ dependencies = [
 
 [project.optional-dependencies]
 embed = ["fastembed>=0.4"]
+rerank = ["fastembed>=0.4"]
+ui = ["gradio>=4.0"]
 dev = ["pytest>=8", "ruff>=0.5"]
 
 [project.scripts]

@@ -124,7 +124,7 @@ def render_report(rows: list[dict], configs_ran: list[str], mock: bool) -> str:
         "| 配置 | 关键词覆盖 | 拒答命中率 | 核验通过率 | 唯一来源数 | token | 用时s |",
         "|---|---|---|---|---|---|---|",
     ]
-    for cfg in configs_ran:
+    for cfg in dict.fromkeys(r["config"] for r in rows):  # 用实际出现在明细里的配置名聚合
         sub = [r for r in rows if r["config"] == cfg]
         lines.append(
             f"| {cfg} | {fmt(mean([r['keyword_coverage'] for r in sub]))} | "
@@ -146,6 +146,7 @@ def main() -> None:
     parser.add_argument("--no-plan", action="store_true", help="单独跑 no-plan 配置")
     parser.add_argument("--no-verify", action="store_true", help="单独跑 no-verify 配置")
     parser.add_argument("--naive", action="store_true", help="单独跑 naive 基线")
+    parser.add_argument("--rerank", action="store_true", help="启用 bge-reranker 重排（需已安装 fastembed）")
     args = parser.parse_args()
 
     questions = QUESTIONS
@@ -168,7 +169,12 @@ def main() -> None:
 
     rows: list[dict] = []
     for cfg in configs_ran:
-        rows.extend(run_config(cfg, CONFIGS[cfg], questions, args.mock))
+        flags = dict(CONFIGS[cfg])
+        label = cfg
+        if args.rerank:
+            flags["rerank_provider"] = "fastembed"
+            label = f"{cfg}+rerank"
+        rows.extend(run_config(label, flags, questions, args.mock))
 
     report = render_report(rows, configs_ran, args.mock)
     out = Path("eval") / f"report_{time.strftime('%Y%m%d-%H%M%S')}.md"

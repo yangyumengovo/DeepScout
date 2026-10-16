@@ -220,3 +220,38 @@ def get_embedder(settings: Settings):
         return _Embedder()
     except Exception:
         return None
+
+
+_RERANKER_CACHE: dict = {}
+
+
+def get_reranker(settings: Settings):
+    """返回重排器（cross-encoder）。未配置、依赖缺失或模型下载失败时返回 None，
+    流水线自动跳过重排——检索增强组件必须可优雅降级，不能因为可选依赖挂掉主流程。
+
+    注意 fastembed 新旧版本类名不同（TextCrossEncoder / TextCrossEncode），
+    导入失败同样降级为 None。
+    """
+    if settings.rerank_provider != "fastembed":
+        return None
+    if settings.rerank_model in _RERANKER_CACHE:
+        return _RERANKER_CACHE[settings.rerank_model]
+    reranker = None
+    try:
+        from fastembed.rerank.cross_encoder import TextCrossEncoder
+
+        model = TextCrossEncoder(settings.rerank_model)
+
+        class _Reranker:
+            name = f"fastembed/{settings.rerank_model}"
+
+            def rerank_top(self, query: str, chunks: list[EvidenceChunk], top_k: int = 6):
+                scores = list(model.rerank(query, [c.text for c in chunks]))
+                order = sorted(range(len(chunks)), key=lambda i: -scores[i])
+                return [chunks[i] for i in order[:top_k]]
+
+        reranker = _Reranker()
+    except Exception:
+        reranker = None
+    _RERANKER_CACHE[settings.rerank_model] = reranker
+    return reranker

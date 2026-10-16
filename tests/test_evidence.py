@@ -3,6 +3,7 @@ from deepscout.evidence import (
     build_evidence,
     chunk_text,
     filter_by_anchors,
+    get_reranker,
     question_anchors,
 )
 from deepscout.settings import Settings
@@ -42,6 +43,11 @@ def test_index_search_ranks_relevant_chunk_first():
 def test_empty_index_returns_empty():
     index = EvidenceIndex([])
     assert index.search("任何查询") == []
+
+
+def test_get_reranker_degrades_to_none():
+    """provider=none 时必须返回 None（主流程不依赖可选组件）。"""
+    assert get_reranker(Settings(_env_file=None)) is None
 
 
 def test_question_anchors_latin_tokens():
