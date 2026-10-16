@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     disable_planner: bool = False  # True: 跳过规划节点，直接用原问题作为唯一子查询
     disable_verify: bool = False  # True: 跳过引用核验节点
 
+    # 对象锚点硬校验（v1.3）：题目含明确对象（产品名/论文名等）时，
+    # 仅允许引用文本中提到该对象的证据，从机制上阻断「主题相邻」式幻觉
+    strict_object_grounding: bool = True
+
     # LLM 响应磁盘缓存（开发期省钱：相同请求直接命中缓存）
     llm_cache: bool = True
 

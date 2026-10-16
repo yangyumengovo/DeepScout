@@ -21,7 +21,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from . import prompts
-from .evidence import EvidenceIndex, build_evidence, get_embedder
+from .evidence import EvidenceIndex, build_evidence, filter_by_anchors, get_embedder, question_anchors
 from .json_utils import extract_json
 from .llm import LLMClient
 from .settings import Settings
@@ -199,10 +199,13 @@ def build_research_graph(ctx: RunContext):
     # ---------- 5. 分章撰写（RAG：从证据库检索后引用写作） ----------
     def write_node(state: ResearchState) -> dict:
         t0 = time.perf_counter()
+        # v1.3 硬校验：题目含明确对象锚点时，仅允许引用提到该对象的证据
+        anchors = question_anchors(state["question"]) if s.strict_object_grounding else []
         sections_out = []
         for title in state["outline"]["sections"]:
-            hits = ctx.index.search(f"{state['question']} {title}", k=6) if ctx.index else []
-            ev_text = prompts.format_evidence([c for c, _ in hits])
+            hits = ctx.index.search(f"{state['question']} {title}", k=8) if ctx.index else []
+            eligible = filter_by_anchors([c for c, _ in hits], anchors)
+            ev_text = prompts.format_evidence(eligible)
             resp = call_llm(
                 f"write:{title[:20]}",
                 prompts.section_messages(state["question"], title, ev_text, s.report_language),

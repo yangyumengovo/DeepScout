@@ -13,10 +13,71 @@
 from __future__ import annotations
 
 import math
+import re
 from collections import Counter
 from dataclasses import dataclass
 
 from .settings import Settings
+
+# 对象锚点提取（v1.3 硬校验）：
+# 边界题评估发现，小模型会把「主题相邻但未提到题目对象」的页面当成证据，
+# 编造虚构产品/论文的内容（v1.2 的 prompt 约束只能缓解）。这里做机制级修复：
+# 只有包含题目锚点（引号内名称 / 形态独特的拉丁串）的证据块才允许被引用。
+_ANCHOR_QUOTED = re.compile(r"[《「“\"']([^《」”\"']{2,80})[》」”\"']")
+_ANCHOR_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9_.\-]{2,}")
+_ANCHOR_STOPWORDS = {
+    "the", "and", "for", "with", "how", "what", "why", "of", "to", "in", "on", "ai",
+}
+
+
+def question_anchors(question: str) -> list[str]:
+    """提取研究问题中的「对象锚点」：
+
+    - 引号/书名号内的完整名称（论文标题、产品名）；
+    - 形态独特的拉丁串：混合大小写（DeepSeek/vLLM）、含连字符（glm-4-flash）、
+      末位数字（Q1）、全大写缩写（RAG/MCP/LLM）。
+    纯中文的宽泛问题（如「大模型长上下文技术如何扩展？」）没有锚点，不做过滤。
+    """
+    anchors: list[str] = []
+    for m in _ANCHOR_QUOTED.finditer(question):
+        s = m.group(1).strip()
+        if len(s) >= 2:
+            anchors.append(s)
+    for m in _ANCHOR_TOKEN.finditer(question):
+        t = m.group(0).strip(".-")
+        if len(t) < 2 or t.lower() in _ANCHOR_STOPWORDS:
+            continue
+        has_upper = any(c.isupper() for c in t)
+        has_lower = any(c.islower() for c in t)
+        distinctive = (
+            ("-" in t)
+            or ("_" in t)
+            or t[-1].isdigit()
+            or (has_upper and has_lower)
+            or (t.isupper() and len(t) >= 3)
+        )
+        if distinctive:
+            anchors.append(t)
+    seen: set[str] = set()
+    out: list[str] = []
+    for a in anchors:
+        key = a.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(a)
+    return out
+
+
+def filter_by_anchors(chunks: list[EvidenceChunk], anchors: list[str]) -> list[EvidenceChunk]:
+    """硬校验：仅保留包含任一锚点（大小写不敏感子串匹配）的证据块。
+
+    无锚点时原样返回（宽泛问题不受影响）；锚点存在而证据全不匹配时返回空列表，
+    由撰写节点按 prompt 规则声明「未找到与该对象直接相关的资料」。
+    """
+    if not anchors:
+        return list(chunks)
+    low = [a.lower() for a in anchors]
+    return [c for c in chunks if any(a in c.text.lower() for a in low)]
 
 
 @dataclass

@@ -1,4 +1,10 @@
-from deepscout.evidence import EvidenceIndex, build_evidence, chunk_text
+from deepscout.evidence import (
+    EvidenceIndex,
+    build_evidence,
+    chunk_text,
+    filter_by_anchors,
+    question_anchors,
+)
 from deepscout.settings import Settings
 
 
@@ -36,3 +42,36 @@ def test_index_search_ranks_relevant_chunk_first():
 def test_empty_index_returns_empty():
     index = EvidenceIndex([])
     assert index.search("任何查询") == []
+
+
+def test_question_anchors_latin_tokens():
+    anchors = question_anchors("请对比 DeepScout-Pro 与 ResearchBot Ultra 两款产品")
+    assert any("DeepScout-Pro" in a for a in anchors)
+    assert any("ResearchBot" in a for a in anchors)
+
+
+def test_question_anchors_quoted_span():
+    anchors = question_anchors("介绍论文《Multi-Agent Consistency Voting》的核心方法")
+    assert any("Consistency" in a for a in anchors)
+
+
+def test_question_anchors_plain_chinese_has_none():
+    assert question_anchors("大模型长上下文技术如何扩展？") == []
+
+
+def test_question_anchors_ignores_generic_words():
+    anchors = question_anchors("how to build an agent for the team")
+    assert anchors == []
+
+
+def test_filter_by_anchors():
+    settings = Settings(_env_file=None)
+    pages = [
+        {"url": "u1", "title": "vllm", "text": "vLLM 使用 PagedAttention 管理显存。"},
+        {"url": "u2", "title": "generic", "text": "推理引擎可以提升服务吞吐量。"},
+    ]
+    chunks = build_evidence(pages, settings)
+    kept = filter_by_anchors(chunks, ["vLLM"])
+    assert [c.url for c in kept] == ["u1"]
+    assert filter_by_anchors(chunks, []) == chunks  # 无锚点不过滤
+    assert filter_by_anchors(chunks, ["不存在的东西"]) == []  # 全不匹配 -> 空（触发拒答路径）
